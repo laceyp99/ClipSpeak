@@ -1,8 +1,8 @@
 # Development setup
 
-ClipSpeak currently has development diagnostics, a resident-synthesis benchmark,
-and buffered playback of fixed public samples. It does not yet read the
-clipboard or create a tray icon.
+ClipSpeak currently has development diagnostics, clipboard snapshots, a
+resident-synthesis benchmark, and buffered playback of fixed public samples.
+FIFO submission, hotkeys, and the tray are not implemented yet.
 
 Use the approved Python 3.12.11 x64 interpreter with uv:
 
@@ -194,3 +194,47 @@ Resume, Stop both active and paused, harmless repeated Stop/Resume after Stop,
 late inference rejection, sequential resident-voice reuse, and rejection of a
 reused control handle. Required checks for this Phase 2 unit passed. Queue/tray
 integration, default-device changes, and sustained memory checks are still pending.
+
+## Clipboard snapshot diagnostic
+
+```powershell
+uv run --locked clipspeak --clipboard-check
+```
+
+This reads Windows `CF_UNICODETEXT` once and copies it into an app-owned Python
+string before releasing the clipboard. It prints status and character count,
+without displaying, saving, or speaking the text. It does not change focus or
+modify the clipboard. A later clipboard change cannot change the returned
+string. The diagnostic does not enqueue work; queue submission is the next unit.
+
+Opening a busy clipboard is retried five times, 50 ms apart, for a maximum
+200 ms of retry waits. Windows delayed rendering and native API calls can add
+time beyond those waits. Empty/whitespace-only content, non-text content, native
+read failures, and submissions above 100,000 characters have separate results.
+Oversized text is rejected without truncation. A bounded UTF-16 read preserves
+Unicode, including supplementary characters, without copying an arbitrary-sized
+clipboard allocation. Pending-item and total-queue limits will be implemented
+with the queue controller.
+
+The reader follows [Microsoft's clipboard ownership rules](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getclipboarddata),
+copying while the clipboard is open and releasing the lock before closing.
+
+### Clipboard validation, 2026-10-08
+
+Thirty tests passed across the project, including seven clipboard tests for
+Unicode and immutable snapshots, transient/permanent contention, empty versus
+non-text content, failed reads and cleanup, malformed data, allocation padding,
+and the 100,000-character boundary (including supplementary Unicode characters).
+The CLI's read-only diagnostic returned status/count without displaying text.
+
+A live 22-character Unicode sample containing accents, Japanese, punctuation,
+and an emoji matched exactly. Clipboard sequence number and contents remained
+unchanged. A separate process holding the clipboard through a hidden window
+caused the reader to return `unavailable` after about 202 ms, then read normally
+after release. The initial windowless test holder did not block the reader;
+using a window-associated holder verified the real contention path. The helper
+window and process were closed, with no clipboard writes performed.
+
+Representative browser, VS Code, and Obsidian copying, actual hotkey submission,
+and queue snapshots remain part of later integration verification. Native delayed
+rendering can exceed the retry wait duration; it has not been measured here.

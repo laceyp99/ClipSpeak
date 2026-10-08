@@ -149,12 +149,19 @@ def main() -> int:
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--benchmark", action="store_true", help="Measure resident synthesis without playback")
     mode.add_argument("--controls-demo", action="store_true", help="Demonstrate pause, resume, stop and fresh playback")
+    mode.add_argument("--clipboard-check", action="store_true", help="Snapshot clipboard and report status/count without displaying text")
     parser.add_argument("--voice", type=Path, default=DEFAULT_VOICE, help="ONNX voice path for benchmark")
     parser.add_argument("--cpu", action="store_true", help="Use CPU for benchmark")
     mode.add_argument("--play-sample", choices=BENCHMARK_TEXTS, help="Play a fixed public sample")
     parser.add_argument("--speed", type=float, default=1.5, help="Pitch-preserving playback speed, 1 to 2")
     parser.add_argument("--volume", type=float, default=1.0, help="Playback volume, 0 to 1")
     args = parser.parse_args()
+    if args.clipboard_check:
+        from .clipboard import read_clipboard_text
+        result = read_clipboard_text()
+        print(json.dumps({"status": result.status,
+                          "characters": len(result.text) if result.text is not None else 0}, indent=2))
+        return 0
     if args.controls_demo:
         voice = ResidentVoice(args.voice, prefer_cuda=not args.cpu, cuda_dll_dir=args.cuda_dll_dir)
         print(json.dumps(controls_demo(voice, speed=args.speed, volume=args.volume), indent=2))
