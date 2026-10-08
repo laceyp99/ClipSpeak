@@ -140,6 +140,41 @@ def controls_demo(voice, *, speed: float, volume: float) -> dict:
             "stop_before_audio": early.to_dict(), "fresh_after_stop": fresh.to_dict()}
 
 
+def queue_demo(voice_factory) -> dict:
+    """Play fixed public submissions with different immutable settings."""
+    from .controller import QueueController, SubmissionStatus
+    samples = [
+        ("one", "This is queue item one, played at normal speed.", 1.0, 1.0),
+        ("two", "This is queue item two, played faster and at half volume.", 1.5, 0.5),
+        ("three", "This is queue item three, played at double speed.", 2.0, 1.0),
+    ]
+    labels = {text: name for name, text, _, _ in samples}
+    completions = []
+
+    def playback(voice, text, **settings):
+        metrics = play_text(voice, text, **settings)
+        completions.append({"sample": labels.get(text, "unexpected"),
+                            "provider": voice.provider, "playback": metrics.to_dict()})
+        return metrics
+
+    controller = QueueController(voice_factory=voice_factory, playback=playback)
+    try:
+        for _, text, speed, volume in samples:
+            result = controller.submit(text, speed=speed, volume=volume)
+            if result.status is not SubmissionStatus.ACCEPTED:
+                raise RuntimeError(result.reason)
+        if not controller.wait_idle(timeout=30):
+            state = controller.snapshot()
+            raise RuntimeError(f"queue demo did not finish ({state.state}, {state.error_type})")
+        state = controller.snapshot()
+        return {"completed": completions, "pending_items": state.pending_items,
+                "total_chars": state.total_chars}
+    finally:
+        controller.close()
+        if not controller.join(timeout=5):
+            raise RuntimeError("queue worker is still finishing synthesis")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -150,12 +185,17 @@ def main() -> int:
     mode.add_argument("--benchmark", action="store_true", help="Measure resident synthesis without playback")
     mode.add_argument("--controls-demo", action="store_true", help="Demonstrate pause, resume, stop and fresh playback")
     mode.add_argument("--clipboard-check", action="store_true", help="Snapshot clipboard and report status/count without displaying text")
+    mode.add_argument("--queue-demo", action="store_true", help="Play three public samples with FIFO settings snapshots")
     parser.add_argument("--voice", type=Path, default=DEFAULT_VOICE, help="ONNX voice path for benchmark")
     parser.add_argument("--cpu", action="store_true", help="Use CPU for benchmark")
     mode.add_argument("--play-sample", choices=BENCHMARK_TEXTS, help="Play a fixed public sample")
     parser.add_argument("--speed", type=float, default=1.5, help="Pitch-preserving playback speed, 1 to 2")
     parser.add_argument("--volume", type=float, default=1.0, help="Playback volume, 0 to 1")
     args = parser.parse_args()
+    if args.queue_demo:
+        factory = lambda: ResidentVoice(args.voice, prefer_cuda=not args.cpu, cuda_dll_dir=args.cuda_dll_dir)
+        print(json.dumps(queue_demo(factory), indent=2))
+        return 0
     if args.clipboard_check:
         from .clipboard import read_clipboard_text
         result = read_clipboard_text()
@@ -186,7 +226,7 @@ def main() -> int:
     import tkinter
 
     print(json.dumps({
-        "status": "Resident synthesis and buffered playback ready; clipboard and tray pending",
+        "status": "Synthesis, playback, clipboard snapshots, and FIFO queue ready; tray and hotkey pending",
         "versions": {name: version(name) for name in (
             "piper-tts", "onnxruntime-gpu", "numpy", "sounddevice", "pystray", "pedalboard",
         )},

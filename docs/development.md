@@ -2,7 +2,8 @@
 
 ClipSpeak currently has development diagnostics, clipboard snapshots, a
 resident-synthesis benchmark, and buffered playback of fixed public samples.
-FIFO submission, hotkeys, and the tray are not implemented yet.
+FIFO submission is available through the controller. Hotkeys and the tray are
+not implemented yet.
 
 Use the approved Python 3.12.11 x64 interpreter with uv:
 
@@ -238,3 +239,54 @@ window and process were closed, with no clipboard writes performed.
 Representative browser, VS Code, and Obsidian copying, actual hotkey submission,
 and queue snapshots remain part of later integration verification. Native delayed
 rendering can exceed the retry wait duration; it has not been measured here.
+
+## FIFO queue diagnostic
+
+```powershell
+uv run --locked clipspeak --queue-demo --cuda-dll-dir 'C:\Users\Patrick\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\lib'
+uv run --locked clipspeak --queue-demo --cpu
+```
+
+The demo submits three fixed public samples together: item one at 1x and full
+volume, item two at 1.5x and half volume, and item three at 2x and full volume.
+These fixed settings are part of the demo rather than the `--speed`/`--volume`
+arguments. It reports completed samples and playback metrics, then closes and
+joins the queue worker. No copied text is displayed or persisted.
+
+`QueueController` owns one worker, a resident voice, active item, pending deque,
+and a one-use playback control for each reading. `submit` snapshots immutable
+text, speed and volume. `submit_clipboard` reads and enqueues while holding the
+submission lock, preserving read order across concurrent calls. Later clipboard
+changes do not change queued text; identical text remains separate submissions.
+The next item starts only after `play_text` returns following output drain and
+synthesis-worker completion. The voice is loaded on the worker at startup and
+reused. Submissions can wait in memory while that load runs; a load failure blocks
+reading and preserves pending items.
+
+Limits are 100,000 characters per item, 20 pending items, and 500,000 characters
+including the active item. Rejected items leave the queue unchanged. Status
+snapshots report counts/state and exception type, without copied text or raw
+error messages. A playback/model error retains the active and pending items and
+halts advancement. Retry/recovery and public Pause/Resume/Stop/Clear Queue actions
+belong to the following units. The controller already has close/join cleanup so
+tests and development harnesses can release their workers safely.
+
+Clipboard reads hold the controller lock, so native delayed rendering can delay
+another submission or control call. Busy-open retries are bounded as documented
+above; delayed rendering is an unmeasured integration limitation.
+
+### Queue validation, 2026-10-08
+
+Thirty-eight project tests passed. Queue tests cover clipboard text and speed/
+volume snapshots, duplicate items, FIFO order across concurrent submissions,
+waiting for playback completion, resident voice reuse, invalid inputs,
+independent pending-count and total-character limits, preservation after errors,
+model loading at startup, and cleanup during a delayed model load. Closed workers
+release active/pending text; error snapshots retain only the exception type.
+
+CUDA and CPU demos completed items one, two, and three in order at the specified
+speeds and volumes, with zero software starvations and output underflows. Pending
+item count and total characters returned to zero, and each worker joined on exit.
+Pat confirmed correct order, a quieter second item, and no overlapping speech.
+Controller control transitions and actionable error recovery remain pending, as
+do tray/hotkey integration, device switching, and sustained memory verification.
