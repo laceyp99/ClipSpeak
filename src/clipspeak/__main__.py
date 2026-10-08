@@ -5,10 +5,12 @@ import json
 import ctypes
 import os
 import time
+import threading
 from importlib.metadata import version
 from pathlib import Path
 
 from .synthesis import DEFAULT_VOICE, ResidentVoice, add_cuda_dll_directory
+from .playback import PlaybackControl, play_text
 
 
 BENCHMARK_TEXTS = {
@@ -91,18 +93,80 @@ def benchmark(path: Path, *, prefer_cuda: bool, cuda_dll_dir: Path | None = None
     }
 
 
+def controls_demo(voice, *, speed: float, volume: float) -> dict:
+    """Run timed controls on fixed public samples without clipboard access."""
+    control = PlaybackControl()
+    done = threading.Event()
+    actions = []
+    started = time.perf_counter()
+
+    def commands():
+        for delay, name in ((3, "pause"), (2, "resume"), (3, "stop")):
+            if done.wait(delay):
+                return
+            before = time.perf_counter()
+            getattr(control, name)()
+            actions.append({"action": name, "at_seconds": before - started,
+                            "call_seconds": time.perf_counter() - before})
+            print(name.upper(), flush=True)
+
+    thread = threading.Thread(target=commands, name="clipspeak-demo-controls")
+    thread.start()
+    try:
+        interrupted = play_text(voice, BENCHMARK_TEXTS["long"], speed=speed,
+                                volume=volume, control=control)
+    finally:
+        done.set()
+        control.stop()
+        thread.join()
+
+    # Cancel a separate request before its first audio, then reuse the resident voice.
+    print("STOP BEFORE FIRST AUDIO", flush=True)
+    early_control = PlaybackControl()
+    timer = threading.Timer(0.03, early_control.stop)
+    timer.start()
+    try:
+        early = play_text(voice, BENCHMARK_TEXTS["short"], speed=speed,
+                         volume=volume, control=early_control)
+    finally:
+        timer.cancel()
+        timer.join()
+        early_control.stop()
+    time.sleep(1)
+    print("FRESH SAMPLE", flush=True)
+    fresh = play_text(voice, BENCHMARK_TEXTS["short"], speed=speed, volume=volume)
+    return {"provider": voice.provider, "actions": actions,
+            "pause_resume_stop": interrupted.to_dict(),
+            "stop_before_audio": early.to_dict(), "fresh_after_stop": fresh.to_dict()}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--cuda-dll-dir", type=Path,
         help="Existing directory containing CUDA 12 and cuDNN 9 DLLs",
     )
-    parser.add_argument("--benchmark", action="store_true", help="Measure resident synthesis without playback")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--benchmark", action="store_true", help="Measure resident synthesis without playback")
+    mode.add_argument("--controls-demo", action="store_true", help="Demonstrate pause, resume, stop and fresh playback")
     parser.add_argument("--voice", type=Path, default=DEFAULT_VOICE, help="ONNX voice path for benchmark")
     parser.add_argument("--cpu", action="store_true", help="Use CPU for benchmark")
+    mode.add_argument("--play-sample", choices=BENCHMARK_TEXTS, help="Play a fixed public sample")
+    parser.add_argument("--speed", type=float, default=1.5, help="Pitch-preserving playback speed, 1 to 2")
+    parser.add_argument("--volume", type=float, default=1.0, help="Playback volume, 0 to 1")
     args = parser.parse_args()
+    if args.controls_demo:
+        voice = ResidentVoice(args.voice, prefer_cuda=not args.cpu, cuda_dll_dir=args.cuda_dll_dir)
+        print(json.dumps(controls_demo(voice, speed=args.speed, volume=args.volume), indent=2))
+        return 0
     if args.benchmark:
         print(json.dumps(benchmark(args.voice, prefer_cuda=not args.cpu, cuda_dll_dir=args.cuda_dll_dir), indent=2))
+        return 0
+    if args.play_sample:
+        voice = ResidentVoice(args.voice, prefer_cuda=not args.cpu, cuda_dll_dir=args.cuda_dll_dir)
+        metrics = play_text(voice, BENCHMARK_TEXTS[args.play_sample], speed=args.speed, volume=args.volume)
+        print(json.dumps({"provider": voice.provider, "fallback_reason": voice.fallback_reason,
+                          "playback": metrics.to_dict()}, indent=2))
         return 0
     if args.cuda_dll_dir:
         add_cuda_dll_directory(args.cuda_dll_dir)
@@ -115,7 +179,7 @@ def main() -> int:
     import tkinter
 
     print(json.dumps({
-        "status": "Resident synthesis ready; clipboard, buffered playback, and tray pending",
+        "status": "Resident synthesis and buffered playback ready; clipboard and tray pending",
         "versions": {name: version(name) for name in (
             "piper-tts", "onnxruntime-gpu", "numpy", "sounddevice", "pystray", "pedalboard",
         )},
