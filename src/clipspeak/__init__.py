@@ -1,0 +1,1 @@
+"""ClipSpeak Windows clipboard reader."""
