@@ -95,7 +95,7 @@ def test_hotkey_reads_on_command_with_future_settings_and_no_success_notice(buil
     instance.settings = replace(instance.settings, speed=2, volume=0.4)
     instance.hotkey.callback()
     instance.poll()
-    assert instance.controller.calls == [{"speed": 1.5, "volume": 1}, {"speed": 2, "volume": 0.4}]
+    assert instance.controller.calls == [{"speed": 1.5, "volume": 0.225}, {"speed": 2, "volume": 0.4}]
     assert not instance.icon.notifications
 
 
@@ -207,6 +207,6 @@ def test_settings_dialog_conflict_preserves_disk_then_success_survives_reload(bu
         assert instance.dialog is None
         assert load_settings(path) == (Settings("Ctrl+Shift+F8", 1.75), None)
         instance.hotkey.callback()
-        assert instance.controller.calls[-1] == {"speed": 1.75, "volume": 1}
+        assert instance.controller.calls[-1] == {"speed": 1.75, "volume": 0.225}
     finally:
         root.destroy()

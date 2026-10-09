@@ -17,7 +17,7 @@ from .windows import Shortcut, format_shortcut, parse_shortcut
 class Settings:
     shortcut: str = "Ctrl+Alt+A"
     speed: float = 1.5
-    volume: float = 1.0
+    volume: float = 0.225
     startup: bool = False
 
     def __post_init__(self) -> None:

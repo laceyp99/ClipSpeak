@@ -12,6 +12,7 @@ from typing import Callable
 from .clipboard import ClipboardResult, ClipboardStatus, read_clipboard_text
 from .playback import PlaybackControl, play_text
 from .synthesis import DEFAULT_VOICE, ResidentVoice
+from .text import markdown_to_speech
 
 
 MAX_ITEM_CHARS = 100_000
@@ -281,7 +282,10 @@ class QueueController:
                     if current and self._paused and control is not None:
                         control.pause()
                 if current and item is not None:
-                    self._playback(voice, item.text, speed=item.speed, volume=item.volume, control=control)
+                    speech_text = markdown_to_speech(item.text)
+                    if speech_text.strip():
+                        self._playback(voice, speech_text, speed=item.speed, volume=item.volume, control=control)
+                    del speech_text
             except Exception as exc:
                 with self._condition:
                     if not self._closing and generation == self._generation:

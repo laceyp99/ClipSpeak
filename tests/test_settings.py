@@ -9,7 +9,7 @@ from clipspeak.windows import parse_shortcut
 
 def test_defaults_and_canonical_shortcut(tmp_path):
     settings, warning = load_settings(tmp_path / "missing.json")
-    assert settings == Settings("Ctrl+Alt+A", 1.5, 1.0, False)
+    assert settings == Settings("Ctrl+Alt+A", 1.5, 0.225, False)
     assert warning is None
     assert Settings("shift+ctrl+f12").shortcut == "Ctrl+Shift+F12"
 

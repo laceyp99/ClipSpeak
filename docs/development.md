@@ -376,7 +376,8 @@ A conflict keeps the previous working mapping and does not save the proposed
 configuration. The initial shortcut can remain unavailable until a different
 one is selected. Even saving the unchanged shortcut retries its registration.
 Keyboard auto-repeat is suppressed; separate presses can submit duplicates.
-Speed accepts 1 through 2, default 1.5, and volume accepts 0 through 100 percent.
+Speed accepts 1 through 2, default 1.5, and volume accepts 0 through 100 percent,
+default 22.5 percent. Saved preferences take precedence over these defaults.
 Changes apply to future submissions, preserving active and pending snapshots.
 
 Configuration is written atomically to `%LOCALAPPDATA%\ClipSpeak\settings.json`
@@ -424,3 +425,49 @@ key press from another application remain unverified. These direct API and
 dialog checks do not replace that manual acceptance check. Startup sign-in,
 output-device changes, and sustained performance remain Phase 5 verification.
 No dependencies or machine-wide settings were added by Phase 4.
+
+### Listening feedback and Markdown cleanup, 2026-10-08
+
+Pat successfully generated speech and changed playback settings in the tray app.
+Full-volume output was too loud alongside other media; 22.5 percent was a
+comfortable level. New Settings now use that volume. Existing saved speed and
+volume are preserved, including any changes made during listening.
+
+Common Markdown syntax is removed locally before playback. Headings and paired
+emphasis are spoken as plain words, list and quote markers are removed, and link
+labels are retained without destination URLs. Code fence delimiters/language
+labels and inline backticks are removed while their contents are preserved.
+This uses the standard library, with no LLM, service, or new dependency.
+
+The original copied text remains in the in-memory queue. Limits and character
+counts use that original snapshot, so cleanup cannot bypass the submission
+limit. Retry cleans the retained item again and uses its original speed/volume.
+An item containing only supported formatting finishes silently and allows the
+next item to play. No clipboard writes or copied-text logs are introduced.
+
+The running app must be quit and relaunched to load these code changes. These
+rules target common Markdown, rather than a complete document renderer. The
+cleaned speech still needs a listening check in the tray app.
+
+Tables and HTML are not yet converted. Ordinary punctuation, C#, Windows paths,
+math operators, URLs outside links, and code identifiers remain intact. Malformed
+backticks and link destinations near the 100,000-character item limit are checked
+without repeated suffix scans. Markdown tests include combined bold/italic,
+nested link destinations, code inside link labels, and single-line triple
+backticks. Controller checks prove original limits and setting snapshots survive
+cleanup, and formatting-only items do not block followers.
+
+One full test run crashed natively during garbage collection on a worker thread
+after the Tk dialog test. Collecting destroyed Tk test objects on the main thread
+addressed the suspected lifetime issue; subsequent full runs passed. This
+test cleanup change does not establish the exact native crash cause.
+
+Final checks passed: 105 tests via `uv run --locked pytest -q`, source compilation,
+`uv lock --check`, and `git diff --check`. Changes remain unstaged and uncommitted.
+The existing tray process retains the old loaded modules until it is restarted;
+no live listening check of the updated cleanup has been performed yet.
+
+Pat subsequently confirmed the restarted app handled Markdown much better and
+preserved speed, volume, and expected behavior. This completes the listening
+check for the Markdown cleanup. Phase 5 startup, output-device switching, and
+sustained performance checks remain pending.

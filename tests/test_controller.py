@@ -16,6 +16,41 @@ def wait_until(predicate, timeout=2):
     raise AssertionError("controller did not reach the expected state")
 
 
+def test_markdown_is_cleaned_for_playback_while_original_snapshot_and_limits_remain():
+    calls = []
+    controller = QueueController(voice_factory=object, playback=lambda voice, text, **kwargs: calls.append((text, kwargs["speed"], kwargs["volume"])))
+    try:
+        controller.pause()
+        source = "# Heading\n\n**Bold** and `snake_case`."
+        reader = lambda: ClipboardResult(ClipboardStatus.OK, source)
+        assert controller.submit_clipboard(reader=reader, speed=1.2, volume=0.225).status == SubmissionStatus.ACCEPTED
+        assert controller.snapshot().total_chars == len(source)
+        assert controller.submit("**" + "x" * 99_998 + "**").status == SubmissionStatus.OVERSIZED
+        controller.resume()
+        assert controller.wait_idle(2)
+        assert calls == [("Heading\n\nBold and snake_case.", 1.2, 0.225)]
+        assert controller.snapshot().total_chars == 0
+    finally:
+        controller.close()
+        assert controller.join(2)
+
+
+def test_formatting_only_item_finishes_silently_and_does_not_block_follower():
+    calls = []
+    controller = QueueController(voice_factory=object, playback=lambda voice, text, **kwargs: calls.append(text))
+    try:
+        controller.pause()
+        assert controller.submit("---\n\n```python\n```\n").status == SubmissionStatus.ACCEPTED
+        assert controller.submit("**Next** reading.").status == SubmissionStatus.ACCEPTED
+        controller.resume()
+        assert controller.wait_idle(2)
+        assert calls == ["Next reading."]
+        assert controller.snapshot().total_chars == 0
+    finally:
+        controller.close()
+        assert controller.join(2)
+
+
 def test_fifo_snapshots_duplicates_and_waits_for_playback_end():
     release = threading.Event()
     started = threading.Event()
