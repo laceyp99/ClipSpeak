@@ -271,6 +271,7 @@ def main() -> int:
         help="Existing directory containing CUDA 12 and cuDNN 9 DLLs",
     )
     mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--tray", action="store_true", help="Run the Windows tray app with saved settings")
     mode.add_argument("--benchmark", action="store_true", help="Measure resident synthesis without playback")
     mode.add_argument("--controls-demo", action="store_true", help="Demonstrate pause, resume, stop and fresh playback")
     mode.add_argument("--clipboard-check", action="store_true", help="Snapshot clipboard and report status/count without displaying text")
@@ -282,6 +283,9 @@ def main() -> int:
     parser.add_argument("--speed", type=float, default=1.5, help="Pitch-preserving playback speed, 1 to 2")
     parser.add_argument("--volume", type=float, default=1.0, help="Playback volume, 0 to 1")
     args = parser.parse_args()
+    if args.tray:
+        from .app import run_app
+        return run_app(lambda: ResidentVoice(args.voice, prefer_cuda=not args.cpu, cuda_dll_dir=args.cuda_dll_dir))
     if args.controller_demo:
         factory = lambda: ResidentVoice(args.voice, prefer_cuda=not args.cpu, cuda_dll_dir=args.cuda_dll_dir)
         print(json.dumps(controller_demo(factory), indent=2))
@@ -320,7 +324,7 @@ def main() -> int:
     import tkinter
 
     print(json.dumps({
-        "status": "Synthesis, playback, clipboard snapshots, and FIFO queue ready; tray and hotkey pending",
+        "status": "Runtime ready; use --tray to launch ClipSpeak",
         "versions": {name: version(name) for name in (
             "piper-tts", "onnxruntime-gpu", "numpy", "sounddevice", "pystray", "pedalboard",
         )},

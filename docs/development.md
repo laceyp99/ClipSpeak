@@ -347,3 +347,80 @@ The Phase 3 fake-backed acceptance checks pass. Tray, hotkey, Settings, single
 instance, live output-device switching, real device-failure recovery, and sustained
 memory verification remain later work. A slow native clipboard renderer may still
 delay another submission, but the controller controls no longer wait for that read.
+
+## Windows tray application
+
+```powershell
+uv run --locked clipspeak --tray --cuda-dll-dir 'C:\Users\Patrick\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\lib'
+uv run --locked clipspeak --tray --cpu
+```
+
+For a console-free launch, use `.venv\Scripts\pythonw.exe -m clipspeak --tray`
+with the same CUDA argument and the repository as working directory. Launch
+shortcuts and actual Windows startup integration remain Phase 5 work. Without
+an accessible CUDA runtime, the existing resident voice falls back to CPU.
+No arguments still runs the development diagnostics. `--speed` and `--volume`
+apply to development samples; the tray app uses saved Settings.
+
+Copy text normally, then press Ctrl+Alt+A. The read command snapshots Unicode
+text and current speed/volume without showing a paste window or changing focus.
+There are no successful-submission notifications. Submission and playback
+failures produce concise notifications without copied text. Right-click the
+speaker tray icon for Pause, Resume, Stop, Clear Queue, Settings, and Quit.
+Left-click opens Settings. The icon and menu show idle, playing, paused, or
+error state. Pending count is omitted per the approved feedback decision.
+
+Settings accepts Ctrl, Alt, Shift, and Win modifiers with a letter, digit, or
+F1 through F24 key, for example Ctrl+Shift+F8. Windows may reserve shortcuts.
+A conflict keeps the previous working mapping and does not save the proposed
+configuration. The initial shortcut can remain unavailable until a different
+one is selected. Even saving the unchanged shortcut retries its registration.
+Keyboard auto-repeat is suppressed; separate presses can submit duplicates.
+Speed accepts 1 through 2, default 1.5, and volume accepts 0 through 100 percent.
+Changes apply to future submissions, preserving active and pending snapshots.
+
+Configuration is written atomically to `%LOCALAPPDATA%\ClipSpeak\settings.json`
+and contains only shortcut, speed, volume, and startup preference. Invalid files
+are preserved and produce a warning while defaults are used. A save failure
+restores the previous shortcut; a failed restore is explicitly reported.
+The startup checkbox is labeled **preference only**. It saves the selection
+but does not yet create a Windows startup entry, which belongs to Phase 5.
+
+Tk owns the main thread. The tray and native hotkey message loop run on separate
+threads, while the established controller owns synthesis/playback. Hotkey
+handling reads the clipboard directly on its command thread; controls and
+Settings requests are dispatched through a queue to Tk. Settings persistence
+and native registration do not run in the audio callback. A per-session native
+mutex rejects duplicate app launches with a message, before loading another
+voice. Quit silences and clears work, unregisters the shortcut, removes the tray,
+cancels UI timers, and waits for canceled inference to finish before releasing
+the instance mutex. It does not terminate an inference thread.
+
+### Phase 4 validation, 2026-10-08
+
+All 92 project tests passed with `uv run --locked pytest -q`. `uv lock --check`,
+source compilation, and `git diff --check` also passed. Source, tests, and
+documentation remain unstaged and uncommitted, including the previous Phase 3
+unit. Planning checkbox updates remain in untracked `plan.md`.
+
+Automated checks cover shortcut parsing, conflicts, failed registration and
+message-loop delivery, cancellation of timed-out queued replacement requests,
+callback errors, registration cleanup, instance handles, strict configuration,
+atomic save and rollback, corrupted settings, actual Tk dialog save/conflict,
+future-submission settings, tray command dispatch, notification suppression,
+startup failure handling, and cleanup continuing after one native failure.
+
+Live Win32 checks passed real hotkey registration and conflict, preservation
+of the working shortcut, command delivery via a synthetic WM_HOTKEY message,
+configuration reload with re-registration, duplicate mutex rejection, and
+mutex reuse after cleanup. A real Tk/tray harness opened Settings and quit.
+Immediate Quit initially produced a pending Tk timer warning. Explicit timer
+cancellation fixed it; both immediate and normal Quit then stopped the tray,
+hotkey, and controller without that warning.
+
+The Windows Computer Use helper failed to connect to its native pipe, including
+after retry and session reset. Therefore visual tray interaction and an actual
+key press from another application remain unverified. These direct API and
+dialog checks do not replace that manual acceptance check. Startup sign-in,
+output-device changes, and sustained performance remain Phase 5 verification.
+No dependencies or machine-wide settings were added by Phase 4.
