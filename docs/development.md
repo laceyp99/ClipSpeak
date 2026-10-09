@@ -1,9 +1,9 @@
 # Development setup
 
-ClipSpeak currently has development diagnostics, clipboard snapshots, a
-resident-synthesis benchmark, and buffered playback of fixed public samples.
-FIFO submission is available through the controller. Hotkeys and the tray are
-not implemented yet.
+For setup and everyday use, start with the [README](../README.md). ClipSpeak now
+includes the tray app, global read shortcut, saved Settings, Markdown cleanup,
+and FIFO controller. This document retains the development diagnostics,
+measurements, and validation history from each implementation stage.
 
 Use the approved Python 3.12.11 x64 interpreter with uv:
 
