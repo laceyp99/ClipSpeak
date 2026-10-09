@@ -175,6 +175,95 @@ def queue_demo(voice_factory) -> dict:
             raise RuntimeError("queue worker is still finishing synthesis")
 
 
+def controller_demo(voice_factory) -> dict:
+    """Exercise real output plus one injected failure on fixed public text."""
+    from .controller import QueueController, SubmissionStatus
+    active = ("The active reading continues after a pause. Clearing the queue preserves "
+              "this reading. Listen for this final sentence after playback resumes.")
+    discarded = "A cleared or stopped pending item must never be heard."
+    fresh = "This fresh reading follows Stop."
+    retry = "The retained item plays again after Resume."
+    follower = "The pending item follows the successful retry."
+    labels = {active: "active", fresh: "fresh", retry: "retry", follower: "follower"}
+    started = threading.Event()
+    completions = []
+    fail_once = True
+
+    def playback(voice, text, **settings):
+        nonlocal fail_once
+        started.set()
+        if text == retry and fail_once:
+            fail_once = False
+            raise RuntimeError("injected diagnostic failure")
+        metrics = play_text(voice, text, **settings)
+        completions.append({"sample": labels.get(text, "unexpected"),
+                            "playback": metrics.to_dict()})
+        return metrics
+
+    controller = QueueController(voice_factory=voice_factory, playback=playback)
+    def submit(text):
+        result = controller.submit(text)
+        if result.status is not SubmissionStatus.ACCEPTED:
+            raise RuntimeError(result.reason)
+    def drain():
+        if not controller.wait_idle(30):
+            raise RuntimeError(f"controller demo did not drain ({controller.snapshot().error_type})")
+    def start_active():
+        started.clear()
+        submit(active)
+        if not started.wait(10):
+            raise RuntimeError("controller demo did not start")
+
+    try:
+        start_active()
+        submit(discarded)
+        time.sleep(2)
+        controller.pause()
+        submit(discarded)
+        controller.clear_queue()
+        paused = controller.snapshot()
+        if not paused.has_active or paused.pending_items:
+            raise RuntimeError("Clear Queue did not preserve only the active item")
+        print("PAUSE AND CLEAR QUEUE", flush=True)
+        time.sleep(2)
+        controller.resume()
+        drain()
+
+        start_active()
+        time.sleep(2)
+        controller.pause()
+        submit(discarded)
+        before = time.perf_counter()
+        controller.stop()
+        stop_seconds = time.perf_counter() - before
+        print("STOP WHILE PAUSED, THEN FRESH READING", flush=True)
+        submit(fresh)
+        drain()
+
+        submit(retry)
+        submit(follower)
+        if controller.wait_idle(10):
+            raise RuntimeError("diagnostic failure was not observed")
+        error = controller.snapshot()
+        print("INJECTED FAILURE, THEN RESUME", flush=True)
+        controller.resume()
+        drain()
+        controller.pause()
+        submit(discarded)
+        controller.quit()
+        if not controller.join(5):
+            raise RuntimeError("controller demo did not quit")
+        return {"completed": completions, "stop_call_seconds": stop_seconds,
+                "retained_after_error": {"has_active": error.has_active,
+                                         "pending_items": error.pending_items,
+                                         "message": error.error_message},
+                "quit_total_chars": controller.snapshot().total_chars}
+    finally:
+        controller.close()
+        if not controller.join(5):
+            raise RuntimeError("controller worker is still finishing inference")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -186,12 +275,17 @@ def main() -> int:
     mode.add_argument("--controls-demo", action="store_true", help="Demonstrate pause, resume, stop and fresh playback")
     mode.add_argument("--clipboard-check", action="store_true", help="Snapshot clipboard and report status/count without displaying text")
     mode.add_argument("--queue-demo", action="store_true", help="Play three public samples with FIFO settings snapshots")
+    mode.add_argument("--controller-demo", action="store_true", help="Demonstrate queue controls, cancellation, and recovery")
     parser.add_argument("--voice", type=Path, default=DEFAULT_VOICE, help="ONNX voice path for benchmark")
     parser.add_argument("--cpu", action="store_true", help="Use CPU for benchmark")
     mode.add_argument("--play-sample", choices=BENCHMARK_TEXTS, help="Play a fixed public sample")
     parser.add_argument("--speed", type=float, default=1.5, help="Pitch-preserving playback speed, 1 to 2")
     parser.add_argument("--volume", type=float, default=1.0, help="Playback volume, 0 to 1")
     args = parser.parse_args()
+    if args.controller_demo:
+        factory = lambda: ResidentVoice(args.voice, prefer_cuda=not args.cpu, cuda_dll_dir=args.cuda_dll_dir)
+        print(json.dumps(controller_demo(factory), indent=2))
+        return 0
     if args.queue_demo:
         factory = lambda: ResidentVoice(args.voice, prefer_cuda=not args.cpu, cuda_dll_dir=args.cuda_dll_dir)
         print(json.dumps(queue_demo(factory), indent=2))

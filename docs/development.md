@@ -266,14 +266,15 @@ reading and preserves pending items.
 Limits are 100,000 characters per item, 20 pending items, and 500,000 characters
 including the active item. Rejected items leave the queue unchanged. Status
 snapshots report counts/state and exception type, without copied text or raw
-error messages. A playback/model error retains the active and pending items and
-halts advancement. Retry/recovery and public Pause/Resume/Stop/Clear Queue actions
-belong to the following units. The controller already has close/join cleanup so
-tests and development harnesses can release their workers safely.
+error messages. A playback/model error preserves work and halts advancement.
+Public controls and recovery are described below. Close/join cleanup lets tests
+and development harnesses release their workers safely.
 
-Clipboard reads hold the controller lock, so native delayed rendering can delay
-another submission or control call. Busy-open retries are bounded as documented
-above; delayed rendering is an unmeasured integration limitation.
+Clipboard reads hold a separate submission lock, preserving read/enqueue order
+without blocking playback controls. Native delayed rendering can still delay
+another submission. Stop and Quit invalidate submissions already reading or
+waiting for that lock. Busy-open retries are bounded as documented above;
+delayed rendering duration remains an unmeasured integration limitation.
 
 ### Queue validation, 2026-10-08
 
@@ -290,3 +291,59 @@ item count and total characters returned to zero, and each worker joined on exit
 Pat confirmed correct order, a quieter second item, and no overlapping speech.
 Controller control transitions and actionable error recovery remain pending, as
 do tray/hotkey integration, device switching, and sustained memory verification.
+
+## Queue controls and recovery diagnostic
+
+```powershell
+uv run --locked clipspeak --controller-demo --cuda-dll-dir 'C:\Users\Patrick\AppData\Local\Programs\Python\Python312\Lib\site-packages\torch\lib'
+uv run --locked clipspeak --controller-demo --cpu
+```
+
+The fixed-public-text demo pauses an active reading, submits more while paused,
+clears pending work, and resumes the retained playback cursor. It then stops a
+second reading while paused and submits fresh work. One injected playback error
+before audio tests retention and Resume retry, followed by the preserved pending
+item. Finally it quits while paused with pending work and joins the worker.
+Console action markers precede JSON metrics. The injected error is a deliberate
+diagnostic fault, not evidence of a physical device failure.
+
+Pause freezes active playback and queue advancement. Resume continues that cursor
+when paused normally. After a synthesis/output error, it retries the active item
+from the beginning with its original text, speed, and volume; the safe error
+message explains this. After model-load failure, it retries model loading. Check
+model files/runtime or output selection as the error message directs. Raw exception
+messages and copied text are omitted. CUDA preference/fallback remains in the
+resident synthesis layer.
+
+Stop invalidates active and pending work and clears logical queue counts
+immediately, including clipboard submissions still being read or waiting to be
+read. Canceled inference may finish internally, but its results and errors cannot
+revive the queue. Fresh work waits for the single worker to finish that inference.
+Clear Queue removes pending items and preserves active playback or its failed
+item awaiting recovery. Quit is terminal: clear, silence, reject new submissions,
+and join outside UI handlers. Repeated commands are harmless. Default-device
+refresh and real device-switch recovery still require later Windows verification.
+
+### Queue control validation, 2026-10-08
+
+Fifty-two project tests passed. Controllable fake playback/reads establish Pause
+before and during reading, submissions while paused, preserved cursor/queue order,
+Clear Queue preserving active work, Stop rejecting delayed successes and errors,
+fresh work waiting for canceled inference, terminal Quit active or paused,
+retry from the beginning with original settings, model-load retry, safe error
+messages, and cancellation of clipboard reads or submissions waiting behind them.
+
+Real CUDA and CPU controller demos completed the active reading after Clear Queue,
+stopped a second active reading while paused, played fresh work, then recovered
+from the injected fault and played the retained item before its pending follower.
+Neither run spoke discarded pending items. Both recorded zero software starvations
+and output underflows. Stop calls took about 10.4 ms on CUDA and 1.5 ms on CPU;
+these measure the control/abort calls, not microphone-measured silence. Quit
+returned logical queued characters to zero and each worker joined. After a replay,
+Pat confirmed clean Pause/Resume, active completion after Clear Queue, no old
+speech after Stop, and fresh/retry/follower playback in the expected order.
+
+The Phase 3 fake-backed acceptance checks pass. Tray, hotkey, Settings, single
+instance, live output-device switching, real device-failure recovery, and sustained
+memory verification remain later work. A slow native clipboard renderer may still
+delay another submission, but the controller controls no longer wait for that read.
